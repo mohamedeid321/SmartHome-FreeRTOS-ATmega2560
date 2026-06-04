@@ -2,7 +2,7 @@
 
 A layered, RTOS-based embedded firmware for a smart home controller, built from scratch on the ATmega2560. The project demonstrates clean firmware architecture (MCAL → HAL → APP → RTOS), a hierarchical state machine, and the full set of FreeRTOS synchronization primitives — tasks, queues, mutexes, and semaphores.
 
-> Simulated on Proteus. Written in Microchip Studio (AVR-GCC).
+> Built and tested on Proteus with Microchip Studio (AVR-GCC).
 
 ---
 
@@ -12,7 +12,7 @@ A layered, RTOS-based embedded firmware for a smart home controller, built from 
 - **Business logic fully decoupled from the RTOS** — the entire decision-making lives in a pure, testable `APP` layer that calls no FreeRTOS function and touches no register.
 - **Hierarchical state machine**: three top-level modes (Auto / Manual / Security) with a nested security sub-machine (locked → entering → unlocked, plus recovery and intruder lockout).
 - **Full FreeRTOS toolkit**: 7 tasks, an event queue, a log queue, four mutexes, and an ISR-driven binary semaphore.
-- **Reliability features**: a watchdog fed by a heartbeat task (auto-reset on hang), persisted settings in EEPROM, and stack-overflow / malloc-failure hooks.
+- **Reliability features**: a Watchdog-Timer-driven system tick (the kernel auto-resets the MCU if the tick is ever starved), persisted settings in EEPROM, and a heartbeat task that blinks a status LED as a live "system alive" indicator.
 - **Real fault detection**: distinguishes a genuinely hot room from a disconnected sensor by flagging physically impossible readings.
 - **18 hand-written drivers**, each with a `config` struct, a `DEFAULT_CONFIG`, public APIs in the header, and line-by-line comments.
 
@@ -22,7 +22,7 @@ A layered, RTOS-based embedded firmware for a smart home controller, built from 
 
 The firmware is organized into four layers. Each layer only depends on the layer beneath it, and everything is parameterized from a single `SystemConfig.h`.
 
-![Architecture](docs/diagram1_architecture.png)
+![Architecture](DOCS/diagram1_architecture.png)
 
 | Layer | Responsibility |
 |-------|----------------|
@@ -39,7 +39,7 @@ The key design decision: **tasks call APP functions**. A task reads an input, pa
 
 ### Modes
 
-![State machine](docs/diagram2_statemachine.png)
+![State machine](DOCS/diagram2_statemachine.png)
 
 **Auto mode** — the system runs itself:
 - Light: lamp turns on when the LDR reads below the brightness threshold.
@@ -72,7 +72,7 @@ Anything shown on the LCD is mirrored to the terminal. From the keypad the user 
 
 ## RTOS Design
 
-![RTOS flow](docs/diagram3_rtosflow.png)
+![RTOS flow](DOCS/diagram3_rtosflow.png)
 
 | Task | Priority | Role |
 |------|----------|------|
@@ -82,7 +82,7 @@ Anything shown on the LCD is mirrored to the terminal. From the keypad the user 
 | Keypad | 2 | Debounced keypad scan |
 | Display | 1 | Renders state to LCD + UART |
 | Logger | 1 | Drains the log queue to SD + UART |
-| Heartbeat | 1 | Blinks the LED and kicks the watchdog |
+| Heartbeat | 1 | Blinks the status LED as a live "alive" indicator |
 
 Synchronization:
 - `eventQueue` carries keypad / sensor / ISR events to the control logic.
@@ -105,7 +105,7 @@ Synchronization:
 
 Pin assignments live in `CONFIG/SystemConfig.h`. To re-wire the board, edit only that file.
 
-> Timer allocation: FreeRTOS uses Timer1 for the system tick, the ICU driver uses Timer5, and the fan PWM uses Timer0 — chosen so nothing conflicts.
+> Timer allocation: the FreeRTOS system tick is driven by the **Watchdog Timer** (via the miniAVRfreeRTOS port), which frees the general-purpose timers. The fan PWM uses Timer0 and the ICU driver uses Timer5 — chosen so nothing conflicts.
 
 ---
 
@@ -125,22 +125,32 @@ SmartHome/
 
 ---
 
+## FreeRTOS Port
+
+This project uses the **[miniAVRfreeRTOS](https://github.com/feilipu/miniAVRfreeRTOS)** distribution rather than the stock FreeRTOS download. The official kernel only ships an `ATmega323` AVR port, which does not run correctly on the ATmega2560 (the larger device needs 3-byte program-counter handling plus `RAMPZ`/`EIND` context saving). The miniAVRfreeRTOS port is tested on the ATmega2560 and drives the system tick from the Watchdog Timer.
+
+---
+
 ## Build & Run
 
 ### Microchip Studio
 
 1. Create a GCC C Executable Project for **ATmega2560**.
-2. Add the FreeRTOS source (`tasks.c`, `queue.c`, `list.c`, the AVR port, `heap_4.c`) and all project files.
-3. Add include paths for `CONFIG/`, `MCAL/*`, `HAL/*`, `APP/`, `RTOS/`, and the FreeRTOS `include` folder.
-4. Define the symbol `F_CPU=16000000UL`.
-5. Build to produce the `.hex`.
+2. Add the FreeRTOS source from miniAVRfreeRTOS (`tasks.c`, `queue.c`, `list.c`, `port.c`, `heap_3.c`) plus all project files.
+3. Add include paths (Toolchain → AVR/GNU C Compiler → Directories) for `CONFIG/`, every `MCAL/*` and `HAL/*` folder, `APP/`, `RTOS/`, and the FreeRTOS headers folder.
+4. Keep a single `FreeRTOSConfig.h` in the project (duplicate copies on the include path cause stale-config build errors).
+5. Define the symbol `F_CPU=16000000UL`.
+6. Build to produce the `.hex`.
 
 ### Proteus
 
 1. Place an ATMEGA2560 and load the `.hex` into it.
-2. Set the clock frequency to 16 MHz.
-3. Wire the devices per `SystemConfig.h` (see the pin map there).
-4. Run the simulation.
+2. Set the Clock Frequency to **16 MHz** and leave the **CKDIV8** fuse Unprogrammed.
+3. Wire the devices per `SystemConfig.h` (see the pin map there and the wiring diagram).
+4. For the LCD: tie **VDD to +5V**, VSS to GND, and the contrast pin (VEE/V0) to a potentiometer wiper.
+5. Run the simulation. Status is shown on the LCD and mirrored to a Virtual Terminal at 9600 baud.
+
+> The SD card logger is SD-safe: if no card responds (common in simulation) it logs only to the UART terminal and never blocks the system.
 
 ---
 
@@ -150,7 +160,8 @@ SmartHome/
 - Decoupling business logic from an RTOS so the logic is portable and testable.
 - Practical use of FreeRTOS tasks, queues, mutexes, and ISR-to-task semaphores.
 - A hierarchical state machine driving a real device set.
-- Defensive firmware: watchdog, persisted security state, fault detection, and diagnostic hooks.
+- Defensive firmware: a Watchdog-driven tick, persisted security state, fault detection, and SD-safe logging.
+- Porting and debugging FreeRTOS onto a larger AVR than the stock port targets.
 
 ---
 
