@@ -1,0 +1,29 @@
+# ---- Microchip Studio / Atmel Studio build output ----
+Debug/
+Release/
+*.o
+*.d
+*.elf
+*.hex
+*.eep
+*.lss
+*.map
+*.srec
+*.bin
+
+# ---- IDE / solution files (machine-specific) ----
+*.cproj.user
+*.atsuo
+*.componentinfo.xml
+.vs/
+*.user
+
+# Keep these IF you want the project to be openable in Microchip Studio.
+# Otherwise, uncomment to exclude the IDE project/solution files entirely:
+# *.cproj
+# *.atsln
+
+# ---- OS junk ----
+.DS_Store
+Thumbs.db
+desktop.ini
